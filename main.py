@@ -3,6 +3,7 @@ import numpy as np
 from ops import *
 import input_data
 from scipy.misc import imsave as ims
+import os
 
 
 class Draw():
@@ -77,10 +78,7 @@ class Draw():
             cs, gen_loss, lat_loss, _ = self.sess.run([self.cs, self.generation_loss, self.latent_loss, self.train_op], feed_dict={self.images: xtrain})
             if i % 300 == 0:
                 print "iter %d genloss %f latloss %f" % (i, gen_loss, lat_loss)
-                results = np.transpose(np.array(cs),[0,1,2])[-1]
-                results_square = np.reshape(results, [-1, 28, 28])
-                print results_square.shape
-                ims("results/"+str(i)+".jpg",merge(results_square,[8,8]))
+                np.save("save.npy",cs)
 
 
     # the read() operation without attention
