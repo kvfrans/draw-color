@@ -92,11 +92,13 @@ class Draw():
             parameters = dense(h_dec, self.n_hidden, 5)
         # gx_, gy_: center of 2d gaussian on a scale of -1 to 1
         gx_, gy_, log_sigma2, log_delta, log_gamma = tf.split(1,5,parameters)
+
         # move gx/gy to be a scale of -imgsize to +imgsize
         gx = (self.img_size+1)/2 * (gx_ + 1)
         gy = (self.img_size+1)/2 * (gy_ + 1)
+
         sigma2 = tf.exp(log_sigma2)
-        # stride: how far apart these patches will be
+        # stride/delta: how far apart these patches will be
         delta = (self.img_size - 1) / ((self.attention_n-1) * tf.exp(log_delta))
         # returns [Fx, Fy, gamma]
         return self.filterbank(gx,gy,sigma2,delta) + (tf.exp(log_gamma),)
