@@ -1,8 +1,9 @@
 import tensorflow as tf
 import numpy as np
 from ops import *
-from scipy.misc import imsave as ims
-
+from utils import *
+from glob import glob
+import os
 
 class Draw():
     def __init__(self):
@@ -31,14 +32,15 @@ class Draw():
         enc_state = self.lstm_enc.zero_state(self.batch_size, tf.float32)
         dec_state = self.lstm_dec.zero_state(self.batch_size, tf.float32)
 
-        x = self.images
+        x = tf.reshape(self.images, [-1, self.img_size*self.img_size*self.num_colors])
         for t in range(self.sequence_length):
             # error image + original image
-            c_prev = tf.zeros((self.batch_size, self.img_size, self.img_size, self.num_colors)) if t == 0 else self.cs[t-1]
+            c_prev = tf.zeros((self.batch_size, self.img_size * self.img_size * self.num_colors)) if t == 0 else self.cs[t-1]
             x_hat = x - tf.sigmoid(c_prev)
             # read the image
-            # r = self.read_basic(x,x_hat,h_dec_prev)
-            r = self.read_attention(x,x_hat,h_dec_prev)
+            r = self.read_basic(x,x_hat,h_dec_prev)
+            # r = self.read_attention(x,x_hat,h_dec_prev)
+
             # encode it to gauss distrib
             self.mu[t], self.logsigma[t], self.sigma[t], enc_state = self.encode(enc_state, tf.concat(1, [r, h_dec_prev]))
             # sample from the distrib to get z
@@ -46,8 +48,8 @@ class Draw():
             # retrieve the hidden layer of RNN
             h_dec, dec_state = self.decode_layer(dec_state, z)
             # map from hidden layer -> image portion, and then write it.
-            # self.cs[t] = c_prev + self.write_basic(h_dec)
-            self.cs[t] = c_prev + self.write_attention(h_dec)
+            self.cs[t] = c_prev + self.write_basic(h_dec)
+            # self.cs[t] = c_prev + self.write_attention(h_dec)
             h_dec_prev = h_dec
             self.share_parameters = True # from now on, share variables
 
@@ -55,7 +57,7 @@ class Draw():
         self.generated_images = tf.nn.sigmoid(self.cs[-1])
 
         # self.generation_loss = tf.reduce_mean(-tf.reduce_sum(self.images * tf.log(1e-10 + self.generated_images) + (1-self.images) * tf.log(1e-10 + 1 - self.generated_images),1))
-        self.generation_loss = tf.nn.l2_loss(self.images_flat - self.generated_images_flat)
+        self.generation_loss = tf.nn.l2_loss(x - self.generated_images)
 
         kl_terms = [0]*self.sequence_length
         for t in xrange(self.sequence_length):
@@ -74,22 +76,6 @@ class Draw():
 
         self.sess = tf.Session()
         self.sess.run(tf.initialize_all_variables())
-
-    def train(self):
-        for i in xrange(15000):
-            xtrain, _ = self.mnist.train.next_batch(self.batch_size)
-            cs, gen_loss, lat_loss, _ = self.sess.run([self.cs, self.generation_loss, self.latent_loss, self.train_op], feed_dict={self.images: xtrain})
-            if i % 1000 == 0:
-                print "iter %d genloss %f latloss %f" % (i, gen_loss, lat_loss)
-
-                cs = 1.0/(1.0+np.exp(-np.array(cs))) # x_recons=sigmoid(canvas)
-
-                for cs_iter in xrange(10):
-                    results = cs[cs_iter]
-                    results_square = np.reshape(results, [-1, 28, 28])
-                    print results_square.shape
-                    ims("results/"+str(i)+"-step-"+str(cs_iter)+".jpg",merge(results_square,[8,8]))
-
 
     # given a hidden decoder layer:
     # locate where to put attention filters
@@ -184,7 +170,8 @@ class Draw():
     def write_basic(self, hidden_layer):
         # map RNN hidden state to image
         with tf.variable_scope("write", reuse=self.share_parameters):
-            decoded_image_portion = dense(hidden_layer, self.n_hidden, self.img_size**2)
+            decoded_image_portion = dense(hidden_layer, self.n_hidden, self.img_size*self.img_size*self.num_colors)
+            # decoded_image_portion = tf.reshape(decoded_image_portion, [-1, self.img_size, self.img_size, self.num_colors])
         return decoded_image_portion
 
     def write_attention(self, hidden_layer):
@@ -197,6 +184,35 @@ class Draw():
         wr = tf.batch_matmul(Fyt, tf.batch_matmul(w, Fx))
         wr = tf.reshape(wr, [self.batch_size, self.img_size**2])
         return wr * tf.reshape(1.0/gamma, [-1, 1])
+
+
+    def train(self):
+        data = glob(os.path.join("../Datasets/celebA", "*.jpg"))
+        base = np.array([get_image(sample_file, 108, is_crop=True) for sample_file in data[0:64]])
+        base += 1
+        base /= 2
+
+        ims("results/base.jpg",merge_color(base,[8,8]))
+
+        for i in range(len(data) / self.batch_size):
+
+            batch_files = data[i*self.batch_size:(i+1)*self.batch_size]
+            batch = [get_image(batch_file, 108, is_crop=True) for batch_file in batch_files]
+            batch_images = np.array(batch).astype(np.float32)
+            batch_images += 1
+            batch_images /= 2
+
+            cs, gen_loss, lat_loss, _ = self.sess.run([self.cs, self.generation_loss, self.latent_loss, self.train_op], feed_dict={self.images: batch_images})
+            print "iter %d genloss %f latloss %f" % (i, gen_loss, lat_loss)
+            if i % 100 == 0:
+
+                cs = 1.0/(1.0+np.exp(-np.array(cs))) # x_recons=sigmoid(canvas)
+
+                for cs_iter in xrange(10):
+                    results = cs[cs_iter]
+                    results_square = np.reshape(results, [-1, self.img_size, self.img_size, self.num_colors])
+                    print results_square.shape
+                    ims("results/"+str(i)+"-step-"+str(cs_iter)+".jpg",merge_color(results_square,[8,8]))
 
 
 

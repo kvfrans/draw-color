@@ -1,8 +1,9 @@
 import tensorflow as tf
 import numpy as np
 from ops import *
+from utils import *
 import input_data
-from scipy.misc import imsave as ims
+# from scipy.misc import imsave as ims
 
 
 class Draw():
@@ -36,8 +37,8 @@ class Draw():
             c_prev = tf.zeros((self.batch_size, self.img_size**2)) if t == 0 else self.cs[t-1]
             x_hat = x - tf.sigmoid(c_prev)
             # read the image
-            # r = self.read_basic(x,x_hat,h_dec_prev)
-            r = self.read_attention(x,x_hat,h_dec_prev)
+            r = self.read_basic(x,x_hat,h_dec_prev)
+            # r = self.read_attention(x,x_hat,h_dec_prev)
             # encode it to guass distrib
             self.mu[t], self.logsigma[t], self.sigma[t], enc_state = self.encode(enc_state, tf.concat(1, [r, h_dec_prev]))
             # sample from the distrib to get z
@@ -45,8 +46,8 @@ class Draw():
             # retrieve the hidden layer of RNN
             h_dec, dec_state = self.decode_layer(dec_state, z)
             # map from hidden layer -> image portion, and then write it.
-            # self.cs[t] = c_prev + self.write_basic(h_dec)
-            self.cs[t] = c_prev + self.write_attention(h_dec)
+            self.cs[t] = c_prev + self.write_basic(h_dec)
+            # self.cs[t] = c_prev + self.write_attention(h_dec)
             h_dec_prev = h_dec
             self.share_parameters = True # from now on, share variables
 
@@ -77,8 +78,8 @@ class Draw():
         for i in xrange(15000):
             xtrain, _ = self.mnist.train.next_batch(self.batch_size)
             cs, gen_loss, lat_loss, _ = self.sess.run([self.cs, self.generation_loss, self.latent_loss, self.train_op], feed_dict={self.images: xtrain})
-            if i % 1000 == 0:
-                print "iter %d genloss %f latloss %f" % (i, gen_loss, lat_loss)
+            print "iter %d genloss %f latloss %f" % (i, gen_loss, lat_loss)
+            if i % 500 == 0:
 
                 cs = 1.0/(1.0+np.exp(-np.array(cs))) # x_recons=sigmoid(canvas)
 
