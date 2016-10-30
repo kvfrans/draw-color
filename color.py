@@ -38,9 +38,8 @@ class Draw():
             c_prev = tf.zeros((self.batch_size, self.img_size * self.img_size * self.num_colors)) if t == 0 else self.cs[t-1]
             x_hat = x - tf.sigmoid(c_prev)
             # read the image
-            r = self.read_basic(x,x_hat,h_dec_prev)
-            # r = self.read_attention(x,x_hat,h_dec_prev)
-
+            # r = self.read_basic(x,x_hat,h_dec_prev)
+            r = self.read_attention(x,x_hat,h_dec_prev)
             # encode it to gauss distrib
             self.mu[t], self.logsigma[t], self.sigma[t], enc_state = self.encode(enc_state, tf.concat(1, [r, h_dec_prev]))
             # sample from the distrib to get z
@@ -48,8 +47,8 @@ class Draw():
             # retrieve the hidden layer of RNN
             h_dec, dec_state = self.decode_layer(dec_state, z)
             # map from hidden layer -> image portion, and then write it.
-            self.cs[t] = c_prev + self.write_basic(h_dec)
-            # self.cs[t] = c_prev + self.write_attention(h_dec)
+            # self.cs[t] = c_prev + self.write_basic(h_dec)
+            self.cs[t] = c_prev + self.write_attention(h_dec)
             h_dec_prev = h_dec
             self.share_parameters = True # from now on, share variables
 
@@ -126,16 +125,24 @@ class Draw():
         Fx, Fy, gamma = self.attn_window("read", h_dec_prev)
         # we have the parameters for a patch of gaussian filters. apply them.
         def filter_img(img, Fx, Fy, gamma):
-            Fxt = tf.transpose(Fx, perm=[0,2,1])
-            img = tf.reshape(img, [-1, self.img_size, self.img_size])
+            # Fx,Fy = [64,5,32]
+            # img = [64, 32*32*3]
+
+            img = tf.reshape(img, [-1, self.img_size, self.img_size, self.num_colors])
+            img_t = tf.transpose(img, perm=[3,0,1,2])
+
+            # color1, color2, color3, color1, color2, color3, etc.
+            batch_colors_array = tf.reshape(img_t, [self.num_colors * self.batch_size, self.img_size, self.img_size])
+            Fx_array = tf.concat(0, [Fx, Fx, Fx])
+            Fy_array = tf.concat(0, [Fy, Fy, Fy])
+
+            Fxt = tf.transpose(Fx_array, perm=[0,2,1])
+
             # Apply the gaussian patches:
-            # keep in mind: horiz = imgsize = verts (they are all the image size)
-            # keep in mind: attn = height/length of attention patches
-            # allfilters = [attn, vert] * [imgsize,imgsize] * [horiz, attn]
-            # we have batches, so the full batch_matmul equation looks like:
-            # [1, 1, vert] * [batchsize,imgsize,imgsize] * [1, horiz, 1]
-            glimpse = tf.batch_matmul(Fy, tf.batch_matmul(img, Fxt))
-            glimpse = tf.reshape(glimpse, [-1, self.attention_n**2])
+            glimpse = tf.batch_matmul(Fy_array, tf.batch_matmul(batch_colors_array, Fxt))
+            glimpse = tf.reshape(glimpse, [self.num_colors, self.batch_size, self.attention_n, self.attention_n])
+            glimpse = tf.transpose(glimpse, [1,2,3,0])
+            glimpse = tf.reshape(glimpse, [self.batch_size, self.attention_n*self.attention_n*self.num_colors])
             # finally scale this glimpse w/ the gamma parameter
             return glimpse * tf.reshape(gamma, [-1, 1])
         x = filter_img(x, Fx, Fy, gamma)
@@ -176,13 +183,24 @@ class Draw():
 
     def write_attention(self, hidden_layer):
         with tf.variable_scope("writeW", reuse=self.share_parameters):
-            w = dense(hidden_layer, self.n_hidden, self.attention_n**2)
-        w = tf.reshape(w, [self.batch_size, self.attention_n, self.attention_n])
+            w = dense(hidden_layer, self.n_hidden, self.attention_n*self.attention_n*self.num_colors)
+
+        w = tf.reshape(w, [self.batch_size, self.attention_n, self.attention_n, self.num_colors])
+        w_t = tf.transpose(w, perm=[3,0,1,2])
         Fx, Fy, gamma = self.attn_window("write", hidden_layer)
-        Fyt = tf.transpose(Fy, perm=[0,2,1])
+
+        # color1, color2, color3, color1, color2, color3, etc.
+        w_array = tf.reshape(w_t, [self.num_colors * self.batch_size, self.attention_n, self.attention_n])
+        Fx_array = tf.concat(0, [Fx, Fx, Fx])
+        Fy_array = tf.concat(0, [Fy, Fy, Fy])
+
+        Fyt = tf.transpose(Fy_array, perm=[0,2,1])
         # [vert, attn_n] * [attn_n, attn_n] * [attn_n, horiz]
-        wr = tf.batch_matmul(Fyt, tf.batch_matmul(w, Fx))
-        wr = tf.reshape(wr, [self.batch_size, self.img_size**2])
+        wr = tf.batch_matmul(Fyt, tf.batch_matmul(w_array, Fx_array))
+        sep_colors = tf.reshape(wr, [self.batch_size, self.num_colors, self.img_size**2])
+        wr = tf.reshape(wr, [self.num_colors, self.batch_size, self.img_size, self.img_size])
+        wr = tf.transpose(wr, [1,2,3,0])
+        wr = tf.reshape(wr, [self.batch_size, self.img_size * self.img_size * self.num_colors])
         return wr * tf.reshape(1.0/gamma, [-1, 1])
 
 

@@ -38,13 +38,18 @@ class Draw():
             x_hat = x - tf.sigmoid(c_prev)
             # read the image
             r = self.read_basic(x,x_hat,h_dec_prev)
+            print r.get_shape()
             # r = self.read_attention(x,x_hat,h_dec_prev)
             # encode it to guass distrib
             self.mu[t], self.logsigma[t], self.sigma[t], enc_state = self.encode(enc_state, tf.concat(1, [r, h_dec_prev]))
             # sample from the distrib to get z
             z = self.sampleQ(self.mu[t],self.sigma[t])
+            print z.get_shape()
             # retrieve the hidden layer of RNN
             h_dec, dec_state = self.decode_layer(dec_state, z)
+
+            print h_dec.get_shape()
+
             # map from hidden layer -> image portion, and then write it.
             self.cs[t] = c_prev + self.write_basic(h_dec)
             # self.cs[t] = c_prev + self.write_attention(h_dec)
