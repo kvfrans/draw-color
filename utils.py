@@ -8,7 +8,7 @@ import cPickle
 def get_image(image_path, image_size, is_crop=True):
     return transform(imread(image_path), image_size, is_crop)
 
-def transform(image, npx=32, is_crop=True):
+def transform(image, npx=64, is_crop=True):
     # npx : # of pixels width/height of image
     if is_crop:
         cropped_image = center_crop(image, npx)
@@ -16,7 +16,7 @@ def transform(image, npx=32, is_crop=True):
         cropped_image = image
     return np.array(cropped_image)/127.5 - 1.
 
-def center_crop(x, crop_h, crop_w=None, resize_w=32):
+def center_crop(x, crop_h, crop_w=None, resize_w=64):
     if crop_w is None:
         crop_w = crop_h
     h, w = x.shape[:2]

@@ -8,7 +8,7 @@ import os
 class Draw():
     def __init__(self):
 
-        self.img_size = 32
+        self.img_size = 64
         self.num_colors = 3
 
         self.attention_n = 5
@@ -33,6 +33,7 @@ class Draw():
         dec_state = self.lstm_dec.zero_state(self.batch_size, tf.float32)
 
         x = tf.reshape(self.images, [-1, self.img_size*self.img_size*self.num_colors])
+        self.attn_params = []
         for t in range(self.sequence_length):
             # error image + original image
             c_prev = tf.zeros((self.batch_size, self.img_size * self.img_size * self.num_colors)) if t == 0 else self.cs[t-1]
@@ -92,6 +93,9 @@ class Draw():
         # stride/delta: how far apart these patches will be
         delta = (self.img_size - 1) / ((self.attention_n-1) * tf.exp(log_delta))
         # returns [Fx, Fy, gamma]
+
+        self.attn_params.append([gx, gy, delta])
+
         return self.filterbank(gx,gy,sigma2,delta) + (tf.exp(log_gamma),)
 
     # Given a center, distance, and spread
@@ -212,27 +216,94 @@ class Draw():
 
         ims("results/base.jpg",merge_color(base,[8,8]))
 
-        for i in range(len(data) / self.batch_size):
+        saver = tf.train.Saver(max_to_keep=2)
 
-            batch_files = data[i*self.batch_size:(i+1)*self.batch_size]
-            batch = [get_image(batch_file, 108, is_crop=True) for batch_file in batch_files]
-            batch_images = np.array(batch).astype(np.float32)
-            batch_images += 1
-            batch_images /= 2
+        for e in xrange(10):
+            for i in range((len(data) / self.batch_size) - 2):
 
-            cs, gen_loss, lat_loss, _ = self.sess.run([self.cs, self.generation_loss, self.latent_loss, self.train_op], feed_dict={self.images: batch_images})
-            print "iter %d genloss %f latloss %f" % (i, gen_loss, lat_loss)
-            if i % 100 == 0:
+                batch_files = data[i*self.batch_size:(i+1)*self.batch_size]
+                batch = [get_image(batch_file, 108, is_crop=True) for batch_file in batch_files]
+                batch_images = np.array(batch).astype(np.float32)
+                batch_images += 1
+                batch_images /= 2
 
-                cs = 1.0/(1.0+np.exp(-np.array(cs))) # x_recons=sigmoid(canvas)
+                cs, attn_params, gen_loss, lat_loss, _ = self.sess.run([self.cs, self.attn_params, self.generation_loss, self.latent_loss, self.train_op], feed_dict={self.images: batch_images})
+                print "epoch %d iter %d genloss %f latloss %f" % (e, i, gen_loss, lat_loss)
+                # print attn_params[0].shape
+                # print attn_params[1].shape
+                # print attn_params[2].shape
+                if i % 800 == 0:
 
-                for cs_iter in xrange(10):
-                    results = cs[cs_iter]
-                    results_square = np.reshape(results, [-1, self.img_size, self.img_size, self.num_colors])
-                    print results_square.shape
-                    ims("results/"+str(i)+"-step-"+str(cs_iter)+".jpg",merge_color(results_square,[8,8]))
+                    saver.save(self.sess, os.getcwd() + "/training/train", global_step=e*10000 + i)
+
+                    cs = 1.0/(1.0+np.exp(-np.array(cs))) # x_recons=sigmoid(canvas)
+
+                    for cs_iter in xrange(10):
+                        results = cs[cs_iter]
+                        results_square = np.reshape(results, [-1, self.img_size, self.img_size, self.num_colors])
+                        print results_square.shape
+                        ims("results/"+str(e)+"-"+str(i)+"-step-"+str(cs_iter)+".jpg",merge_color(results_square,[8,8]))
+
+
+    def view(self):
+        data = glob(os.path.join("../Datasets/celebA", "*.jpg"))
+        base = np.array([get_image(sample_file, 108, is_crop=True) for sample_file in data[0:64]])
+        base += 1
+        base /= 2
+
+        ims("results/base.jpg",merge_color(base,[8,8]))
+
+        saver = tf.train.Saver(max_to_keep=2)
+        saver.restore(self.sess, tf.train.latest_checkpoint(os.getcwd()+"/training/"))
+
+        cs, attn_params, gen_loss, lat_loss = self.sess.run([self.cs, self.attn_params, self.generation_loss, self.latent_loss], feed_dict={self.images: base})
+        print "genloss %f latloss %f" % (gen_loss, lat_loss)
+
+        cs = 1.0/(1.0+np.exp(-np.array(cs))) # x_recons=sigmoid(canvas)
+
+        print np.shape(cs)
+        print np.shape(attn_params)
+            # cs[0][cent]
+
+        for cs_iter in xrange(10):
+            results = cs[cs_iter]
+            results_square = np.reshape(results, [-1, self.img_size, self.img_size, self.num_colors])
+
+            print np.shape(results_square)
+
+            for i in xrange(64):
+                center_x = int(attn_params[cs_iter][0][i][0])
+                center_y = int(attn_params[cs_iter][1][i][0])
+                distance = int(attn_params[cs_iter][2][i][0])
+
+                size = 2;
+
+                # for x in xrange(3):
+                #     for y in xrange(3):
+                #         nx = x - 1;
+                #         ny = y - 1;
+                #
+                #         xpos = center_x + nx*distance
+                #         ypos = center_y + ny*distance
+                #
+                #         xpos2 = min(max(0, xpos + size), 63)
+                #         ypos2 = min(max(0, ypos + size), 63)
+                #
+                #         xpos = min(max(0, xpos), 63)
+                #         ypos = min(max(0, ypos), 63)
+                #
+                #         results_square[i,xpos:xpos2,ypos:ypos2,0] = 0;
+                #         results_square[i,xpos:xpos2,ypos:ypos2,1] = 1;
+                #         results_square[i,xpos:xpos2,ypos:ypos2,2] = 0;
+                # print "%f , %f" % (center_x, center_y)
+
+            print results_square
+
+            ims("results/view-clean-step-"+str(cs_iter)+".jpg",merge_color(results_square,[8,8]))
+
 
 
 
 model = Draw()
-model.train()
+# model.train()
+model.view()
